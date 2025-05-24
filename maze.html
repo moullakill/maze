@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Jeu du Labyrinthe avec Pubs</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #container {
+      display: flex;
+      height: 90vh;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 900px;
+      max-width: 95vw;
+    }
+
+    .pub {
+      width: 160px;
+      background: #222;
+      padding: 20px 10px;
+      box-sizing: border-box;
+      color: #ccc;
+      font-size: 1.1em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border-radius: 8px;
+      user-select: none;
+      line-height: 1.4;
+    }
+
+    #game-area {
+      text-align: center;
+      user-select: none;
+    }
+
+    #score, #timer {
+      font-size: 1.5em;
+      margin: 10px 0;
+    }
+
+    canvas {
+      border: 2px solid white;
+      display: block;
+      margin: auto;
+      background: #222;
+      border-radius: 8px;
+    }
+
+    #game-over {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(200, 0, 0, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-size: 3em;
+      z-index: 999;
+      display: none;
+      flex-direction: column;
+    }
+
+    #game-over button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 1em;
+      background: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 5px;
+      color: #111;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div class="pub">
+      Pub à venir.<br />
+      En attendant, faisons une partie !
+    </div>
+
+    <div id="game-area">
+      <div id="score">Score : 0</div>
+      <div id="timer">Temps restant : 90s</div>
+      <canvas id="mazeCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <div class="pub">
+      Pub à venir.<br />
+      En attendant, faisons une partie !
+    </div>
+  </div>
+
+  <div id="game-over">
+    <div id="game-over-text">Game Over 😵</div>
+    <button onclick="restartGame()">Rejouer</button>
+  </div>
+
+  <script>
+    // Modification possible ici pour changer le temps de jeu (en secondes)
+    const baseTime = 90;
+
+    const cols = 20;
+    const rows = 20;
+    const cellSize = 25;
+    let score = 0;
+    let timeLeft = baseTime;
+    let timer;
+    let gameEnded = false;
+
+    const canvas = document.getElementById('mazeCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('score');
+    const timerDisplay = document.getElementById('timer');
+    const gameOverScreen = document.getElementById('game-over');
+    const gameOverText = document.getElementById('game-over-text');
+
+    class Cell {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.walls = { top: true, right: true, bottom: true, left: true };
+        this.visited = false;
+      }
+
+      draw() {
+        const x = this.x * cellSize;
+        const y = this.y * cellSize;
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+
+        if (this.walls.top) {
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + cellSize, y); ctx.stroke();
+        }
+        if (this.walls.right) {
+          ctx.beginPath(); ctx.moveTo(x + cellSize, y); ctx.lineTo(x + cellSize, y + cellSize); ctx.stroke();
+        }
+        if (this.walls.bottom) {
+          ctx.beginPath(); ctx.moveTo(x, y + cellSize); ctx.lineTo(x + cellSize, y + cellSize); ctx.stroke();
+        }
+        if (this.walls.left) {
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + cellSize); ctx.stroke();
+        }
+      }
+
+      highlight(color) {
+        const x = this.x * cellSize;
+        const y = this.y * cellSize;
+        ctx.fillStyle = color;
+        ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+      }
+    }
+
+    let grid = [];
+    let player;
+    let end;
+
+    function index(x, y) {
+      if (x < 0 || y < 0 || x >= cols || y >= rows) return -1;
+      return x + y * cols;
+    }
+
+    function getNeighbors(cell) {
+      const neighbors = [];
+
+      const top = grid[index(cell.x, cell.y - 1)];
+      const right = grid[index(cell.x + 1, cell.y)];
+      const bottom = grid[index(cell.x, cell.y + 1)];
+      const left = grid[index(cell.x - 1, cell.y)];
+
+      if (top && !top.visited) neighbors.push(top);
+      if (right && !right.visited) neighbors.push(right);
+      if (bottom && !bottom.visited) neighbors.push(bottom);
+      if (left && !left.visited) neighbors.push(left);
+
+      return neighbors;
+    }
+
+    function removeWalls(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+
+      if (dx === 1) {
+        a.walls.left = false;
+        b.walls.right = false;
+      } else if (dx === -1) {
+        a.walls.right = false;
+        b.walls.left = false;
+      }
+
+      if (dy === 1) {
+        a.walls.top = false;
+        b.walls.bottom = false;
+      } else if (dy === -1) {
+        a.walls.bottom = false;
+        b.walls.top = false;
+      }
+    }
+
+    function generateMaze() {
+      grid = [];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          grid.push(new Cell(x, y));
+        }
+      }
+
+      const stack = [];
+      const start = grid[0];
+      start.visited = true;
+      stack.push(start);
+
+      while (stack.length > 0) {
+        const current = stack.pop();
+        const neighbors = getNeighbors(current);
+
+        if (neighbors.length > 0) {
+          stack.push(current);
+          const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+          removeWalls(current, next);
+          next.visited = true;
+          stack.push(next);
+        }
+      }
+
+      player = grid[0];
+      end = grid[grid.length - 1];
+      resetTimer();
+    }
+
+    function drawMaze() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      grid.forEach(cell => cell.draw());
+      end.highlight("green");
+      player.highlight("red");
+    }
+
+    function movePlayer(dir) {
+      if (gameEnded) return;
+      let next;
+      switch (dir) {
+        case 'ArrowUp':
+          if (!player.walls.top) next = grid[index(player.x, player.y - 1)];
+          break;
+        case 'ArrowDown':
+          if (!player.walls.bottom) next = grid[index(player.x, player.y + 1)];
+          break;
+        case 'ArrowLeft':
+          if (!player.walls.left) next = grid[index(player.x - 1, player.y)];
+          break;
+        case 'ArrowRight':
+          if (!player.walls.right) next = grid[index(player.x + 1, player.y)];
+          break;
+      }
+
+      if (next) {
+        player = next;
+        drawMaze();
+        if (player === end) {
+          clearInterval(timer);
+          const multiplier = Math.max(1, Math.floor(timeLeft / 5));
+          score += multiplier;
+          scoreDisplay.textContent = `Score : ${score} (+${multiplier})`;
+          generateMaze();
+          drawMaze();
+        }
+      }
+    }
+
+    function onKeyDown(e) {
+      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+      if (keys.includes(e.key)) {
+        e.preventDefault();
+        movePlayer(e.key);
+      }
+    }
+
+    function updateTimer() {
+      timeLeft--;
+      timerDisplay.textContent = `Temps restant : ${timeLeft}s`;
+      if (timeLeft <= 0) {
+        clearInterval(timer);
+        showGameOver();
+      }
+    }
+
+    function resetTimer() {
+      clearInterval(timer);
+      timeLeft = baseTime;
+      timerDisplay.textContent = `Temps restant : ${timeLeft}s`;
+      timer = setInterval(updateTimer, 1000);
+    }
+
+    function showGameOver() {
+      gameEnded = true;
+      gameOverScreen.style.display = 'flex';
+    }
+
+    function restartGame() {
+      gameEnded = false;
+      score = 0;
+      scoreDisplay.textContent = "Score : 0";
+      gameOverScreen.style.display = 'none';
+      generateMaze();
+      drawMaze();
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+
+    // Initialisation
+    generateMaze();
+    drawMaze();
+  </script>
+</body>
+</html>
